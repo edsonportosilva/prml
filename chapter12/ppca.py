@@ -29,18 +29,12 @@ class ProbabilisticPCA:
     
     def _initialize_W(self, W_init):
         np.random.seed(self.seed)
-        if W_init is None:
-            return np.random.randn(self.D, self.M)
-        else:
-            return W_init
+        return np.random.randn(self.D, self.M) if W_init is None else W_init
         
         
     def _initialize_sigma2(self, sigma2_init):
         np.random.seed(self.seed)
-        if sigma2_init is None:
-            return np.random.rand()
-        else:
-            return sigma2_init
+        return np.random.rand() if sigma2_init is None else sigma2_init
         
         
     def missing_expectation(self, Xsamp):
@@ -79,13 +73,13 @@ class ProbabilisticPCA:
         return Xfinal
 
 
-    def norm2_missing_sample(Xsamp, mu, W, sigma2):
-        D = Xsamp.shape[0]
-        ix_miss = np.isnan(Xsamp)
+    def norm2_missing_sample(self, mu, W, sigma2):
+        D = self.shape[0]
+        ix_miss = np.isnan(self)
         D_miss = ix_miss.sum()
 
-        X_miss, X_obs = Xsamp[ix_miss], Xsamp[~ix_miss]
-        W_miss, W_obs = W[ix_miss], W[~ix_miss]    
+        X_miss, X_obs = self[ix_miss], self[~ix_miss]
+        W_miss, W_obs = W[ix_miss], W[~ix_miss]
         mu_miss, mu_obs = mu[ix_miss], mu[~ix_miss]
 
         C_miss = W_miss @ W_miss.T + sigma2 * np.identity(D_miss)
@@ -94,13 +88,13 @@ class ProbabilisticPCA:
 
 
         expected_norm = (X_obs - mu_obs) @ (X_obs - mu_obs)
-        expected_norm = expected_norm + np.trace(C_miss - C_miss_obs @ np.linalg.inv(C_obs) @ C_miss_obs.T)
+        return expected_norm + np.trace(
+            C_miss - C_miss_obs @ np.linalg.inv(C_obs) @ C_miss_obs.T
+        )
 
-        return expected_norm
-
-    def norm2_missing_sum(X, mu, W, sigma2):
+    def norm2_missing_sum(self, mu, W, sigma2):
         norm2_sum = 0
-        for Xsamp in X:
+        for Xsamp in self:
             norm2_sum = norm2_sum + norm2_missing_sample(Xsamp, mu, W, sigma2)
         return norm2_sum
 
@@ -123,19 +117,15 @@ class ProbabilisticPCA:
     def update_sigma2(self):
         T2 = - 2 * np.einsum("in,mi,nm->", self.E_zn, self.W, self.Xbar, optimize=True)
         T3 = np.einsum("ijn,mi,mj->", self.E_znzn, self.W, self.W, optimize="optimal")
-        sigma2_new = (self.Xnorm2 + T2 + T3) / (self.N * self.D)
-        
-        return sigma2_new
+        return (self.Xnorm2 + T2 + T3) / (self.N * self.D)
     
     
     def update_W(self):
         T1 = np.einsum("nd,mn,jmn->dj", self.Xbar,
                        self.E_zn, self.E_znzn, optimize="optimal")
         T2 = self.E_znzn.sum(axis=-1)
-        
-        W_new = (T1 @ np.linalg.inv(T2))
-        
-        return W_new
+
+        return (T1 @ np.linalg.inv(T2))
     
     
     def _update_parameters(self):
@@ -158,26 +148,27 @@ class ProbabilisticPCA:
         with respect to the posterior distribution of the latent
         variable
         """
-        Q = -(self.N * self.M * np.log(2 * np.pi) / 2 +
-              np.einsum("iin->", self.E_znzn) + 
-              D * np.log(2 * np.pi * self.sigma2) / 2 +
-              self.Xnorm2 / (2 *  self.sigma2) +
-              -np.einsum("in,mi,nm->", self.E_zn, self.W, self.Xbar, optimize=True) / (self.sigma2) + 
-              np.einsum("ijn,mi,mj->", self.E_znzn, self.W, self.W, optimize="optimal") / (self.sigma2)
-              )
-        
-        return Q
+        return -(
+            self.N * self.M * np.log(2 * np.pi) / 2
+            + np.einsum("iin->", self.E_znzn)
+            + D * np.log(2 * np.pi * self.sigma2) / 2
+            + self.Xnorm2 / (2 * self.sigma2)
+            + -np.einsum("in,mi,nm->", self.E_zn, self.W, self.Xbar, optimize=True)
+            / (self.sigma2)
+            + np.einsum(
+                "ijn,mi,mj->", self.E_znzn, self.W, self.W, optimize="optimal"
+            )
+            / (self.sigma2)
+        )
     
     def project(self):
         Mz = self.W.T @ self.W + self.sigma2 * np.identity(self.M)
-        Xproj = inv(Mz) @ self.W.T @ self.Xbar.T
-        return Xproj
+        return inv(Mz) @ self.W.T @ self.Xbar.T
     
     def EM_step(self):
         # E-step
         self.E_zn, self.E_znzn = self._compute_expectations()
         # M-step
         self.sigma2, self.W = self._update_parameters()
-        
-        Q = self.data_log_likelihood()
-        return Q
+
+        return self.data_log_likelihood()
